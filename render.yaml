@@ -14,6 +14,7 @@ services:
       - key: GOOGLE_CLIENT_ID
       - key: GOOGLE_CLIENT_SECRET
       - key: OPENAI_API_KEY
+      - key: OPENAI_REPLY_MODELS
       - key: STRIPE_SECRET_KEY
       - key: STRIPE_WEBHOOK_SECRET
       - key: STRIPE_PRICE_ID

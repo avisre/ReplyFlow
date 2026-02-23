@@ -2,7 +2,7 @@ import { authOptions } from "@/lib/auth";
 import { decryptSecret } from "@/lib/crypto";
 import { connectToDatabase } from "@/lib/db";
 import { postReplyToGoogle } from "@/lib/google";
-import { generateReplyText } from "@/lib/reply";
+import { generateReplyText, ReplyGenerationError } from "@/lib/reply";
 import Review from "@/models/Review";
 import User from "@/models/User";
 import { getServerSession } from "next-auth";
@@ -111,6 +111,17 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Generate reply failed:", error);
+
+    if (error instanceof ReplyGenerationError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code ?? "reply_generation_error",
+        },
+        { status: error.status },
+      );
+    }
+
     return NextResponse.json({ error: "Unable to generate AI reply" }, { status: 500 });
   }
 }
