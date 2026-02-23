@@ -1,4 +1,5 @@
 import { connectToDatabase } from "@/lib/db";
+import { encryptSecret } from "@/lib/crypto";
 import User from "@/models/User";
 import bcrypt from "bcryptjs";
 import type { AuthOptions, User as NextAuthUser } from "next-auth";
@@ -101,18 +102,23 @@ export const authOptions: AuthOptions = {
           name: user.name ?? defaultName,
           email,
           googleId: account.providerAccountId,
-          googleAccessToken: account.access_token,
-          googleRefreshToken: account.refresh_token,
+          googleAccessToken: encryptSecret(account.access_token),
+          googleRefreshToken: encryptSecret(account.refresh_token),
+          alertEmail: email,
           subscriptionStatus: "trialing",
           trialEndsAt: trialEndDate(),
         });
       } else {
         dbUser.name = user.name ?? dbUser.name ?? defaultName;
         dbUser.googleId = account.providerAccountId;
-        dbUser.googleAccessToken = account.access_token;
+        dbUser.googleAccessToken = encryptSecret(account.access_token) ?? dbUser.googleAccessToken;
 
         if (account.refresh_token) {
-          dbUser.googleRefreshToken = account.refresh_token;
+          dbUser.googleRefreshToken = encryptSecret(account.refresh_token);
+        }
+
+        if (!dbUser.alertEmail) {
+          dbUser.alertEmail = email;
         }
 
         if (!dbUser.trialEndsAt && dbUser.subscriptionStatus !== "active") {

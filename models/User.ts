@@ -30,6 +30,20 @@ const UserSchema = new Schema(
       type: String,
       default: null,
     },
+    autoPostReplies: {
+      type: Boolean,
+      default: false,
+    },
+    newReviewAlertsEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    alertEmail: {
+      type: String,
+      default: null,
+      lowercase: true,
+      trim: true,
+    },
     stripeCustomerId: {
       type: String,
       default: null,

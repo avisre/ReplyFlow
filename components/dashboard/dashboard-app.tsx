@@ -9,6 +9,8 @@ import {
   getInitials,
 } from "@/lib/utils";
 import {
+  Bell,
+  Bot,
   CreditCard,
   LayoutDashboard,
   LogOut,
@@ -38,9 +40,17 @@ type ReviewItem = {
   status: "pending" | "generated" | "posted";
   postedAt: string | null;
   createdAt: string;
+  locationId: string | null;
+  locationName: string;
 };
 
 type FilterTab = "all" | "awaiting" | "replied";
+
+type SettingsState = {
+  autoPostReplies: boolean;
+  newReviewAlertsEnabled: boolean;
+  alertEmail: string;
+};
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
@@ -59,9 +69,16 @@ export default function DashboardApp() {
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [generatingReviewId, setGeneratingReviewId] = useState<string | null>(null);
   const [postingReviewId, setPostingReviewId] = useState<string | null>(null);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [search, setSearch] = useState("");
+  const [settings, setSettings] = useState<SettingsState>({
+    autoPostReplies: false,
+    newReviewAlertsEnabled: true,
+    alertEmail: "",
+  });
 
   const refreshReviews = useCallback(async () => {
     setIsLoadingReviews(true);
@@ -90,9 +107,40 @@ export default function DashboardApp() {
     }
   }, []);
 
+  const refreshSettings = useCallback(async () => {
+    setIsLoadingSettings(true);
+
+    try {
+      const response = await fetch("/api/settings", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const data = (await response.json()) as {
+        settings?: SettingsState;
+        error?: string;
+      };
+
+      if (!response.ok || !data.settings) {
+        throw new Error(data.error ?? "Unable to load settings");
+      }
+
+      setSettings(data.settings);
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to load settings.");
+    } finally {
+      setIsLoadingSettings(false);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshReviews();
   }, [refreshReviews]);
+
+  useEffect(() => {
+    void refreshSettings();
+  }, [refreshSettings]);
 
   useEffect(() => {
     const checkoutStatus = searchParams.get("checkout");
@@ -125,13 +173,26 @@ export default function DashboardApp() {
         body: JSON.stringify({ reviewId }),
       });
 
-      const data = (await response.json()) as { review?: ReviewItem; error?: string };
+      const data = (await response.json()) as {
+        review?: ReviewItem;
+        autoPosted?: boolean;
+        warning?: string | null;
+        error?: string;
+      };
       if (!response.ok || !data.review) {
         throw new Error(data.error ?? "Failed to generate reply");
       }
 
       updateReview(data.review);
-      toast.success("Reply generated.");
+      if (data.autoPosted) {
+        toast.success("Reply generated and auto-posted.");
+      } else {
+        toast.success("Reply generated.");
+      }
+
+      if (data.warning) {
+        toast.error(data.warning);
+      }
     } catch (error) {
       console.error(error);
       toast.error("Unable to generate AI reply.");
@@ -180,6 +241,38 @@ export default function DashboardApp() {
       toast.error("Unable to post this reply.");
     } finally {
       setPostingReviewId(null);
+    }
+  };
+
+  const saveSettings = async () => {
+    setIsSavingSettings(true);
+
+    try {
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(settings),
+      });
+
+      const data = (await response.json()) as {
+        settings?: SettingsState;
+        message?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !data.settings) {
+        throw new Error(data.error ?? "Failed to save settings");
+      }
+
+      setSettings(data.settings);
+      toast.success(data.message ?? "Settings updated.");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to save settings.");
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -261,6 +354,49 @@ export default function DashboardApp() {
       awaitingReply,
       repliesPostedThisMonth,
       averageStarRating,
+    };
+  }, [reviews]);
+
+  const ratingTrend = useMemo(() => {
+    const now = new Date();
+    const monthBuckets = Array.from({ length: 6 }, (_, index) => {
+      const bucketDate = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      return {
+        key: `${bucketDate.getFullYear()}-${bucketDate.getMonth()}`,
+        label: bucketDate.toLocaleString(undefined, { month: "short" }),
+        sum: 0,
+        count: 0,
+      };
+    });
+
+    const bucketMap = new Map(monthBuckets.map((bucket) => [bucket.key, bucket]));
+
+    for (const review of reviews) {
+      const reviewDate = new Date(review.createdAt);
+      const key = `${reviewDate.getFullYear()}-${reviewDate.getMonth()}`;
+      const target = bucketMap.get(key);
+
+      if (target) {
+        target.sum += review.rating;
+        target.count += 1;
+      }
+    }
+
+    const withAverage = monthBuckets.map((bucket) => ({
+      ...bucket,
+      average: bucket.count > 0 ? bucket.sum / bucket.count : 0,
+    }));
+
+    const currentMonth = withAverage.at(-1);
+    const previousMonth = withAverage.at(-2);
+    const delta =
+      currentMonth && previousMonth && previousMonth.count > 0
+        ? currentMonth.average - previousMonth.average
+        : 0;
+
+    return {
+      buckets: withAverage,
+      delta,
     };
   }, [reviews]);
 
@@ -416,6 +552,59 @@ export default function DashboardApp() {
             </div>
           </div>
 
+          <section className="mt-8 card-base p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Star Rating Trend (Last 6 Months)</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  Track changes in average customer sentiment month by month.
+                </p>
+              </div>
+
+              <span
+                className={cn(
+                  "inline-flex rounded-full px-3 py-1 text-xs font-semibold",
+                  ratingTrend.delta > 0
+                    ? "bg-emerald-100 text-emerald-700"
+                    : ratingTrend.delta < 0
+                      ? "bg-red-100 text-red-700"
+                      : "bg-gray-100 text-gray-700",
+                )}
+              >
+                {ratingTrend.delta > 0 ? "+" : ""}
+                {ratingTrend.delta.toFixed(1)} vs last month
+              </span>
+            </div>
+
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {ratingTrend.buckets.map((bucket) => (
+                <div key={bucket.key} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="flex h-24 items-end rounded-lg bg-white p-2">
+                    <div
+                      className={cn(
+                        "w-full rounded-md transition-all duration-200",
+                        bucket.average >= 4
+                          ? "bg-emerald-500"
+                          : bucket.average >= 3
+                            ? "bg-amber-500"
+                            : "bg-red-500",
+                      )}
+                      style={{
+                        height: `${Math.max(8, Math.round((bucket.average / 5) * 100))}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    {bucket.label}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {bucket.count > 0 ? `${bucket.average.toFixed(1)}★` : "No data"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section id="reviews" className="mt-8 card-base p-6">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 p-1">
@@ -485,6 +674,9 @@ export default function DashboardApp() {
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-semibold text-gray-900">{review.reviewerName}</p>
                               <span className="text-xs text-gray-500">{formatDate(review.createdAt)}</span>
+                              <span className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                {review.locationName}
+                              </span>
                             </div>
                             <div className="mt-1 flex items-center gap-1 text-amber-500">
                               {[1, 2, 3, 4, 5].map((star) => (
@@ -594,16 +786,113 @@ export default function DashboardApp() {
           </section>
 
           <section id="settings" className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900">Settings Snapshot</h2>
-            <p className="mt-2 text-sm text-gray-600">
-              Account status: <span className="font-semibold">{session?.user?.subscriptionStatus}</span>
-            </p>
-            <p className="mt-1 text-sm text-gray-600">
-              Trial ends:{" "}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Automation Settings</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  Control fully automatic posting and new review email alerts.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={saveSettings}
+                disabled={isSavingSettings || isLoadingSettings}
+                className="btn-primary"
+              >
+                {isSavingSettings ? (
+                  <>
+                    <LoadingSpinner />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Settings"
+                )}
+              </button>
+            </div>
+
+            {isLoadingSettings ? (
+              <div className="mt-5 flex items-center gap-2 text-sm text-gray-600">
+                <LoadingSpinner className="text-indigo-600" />
+                Loading settings...
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="pr-4">
+                    <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <Bot className="h-4 w-4 text-indigo-600" />
+                      Fully Automatic Posting
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Generate and post replies automatically for every new review.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.autoPostReplies}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        autoPostReplies: event.target.checked,
+                      }))
+                    }
+                    className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="pr-4">
+                    <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <Bell className="h-4 w-4 text-indigo-600" />
+                      New Review Email Alerts
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Get an email every time a new Google review arrives.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.newReviewAlertsEnabled}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        newReviewAlertsEnabled: event.target.checked,
+                      }))
+                    }
+                    className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                </label>
+
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 lg:col-span-2">
+                  <p className="text-sm font-semibold text-gray-900">Alert Destination Email</p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Email used for review notifications when alerts are enabled.
+                  </p>
+                  <input
+                    value={settings.alertEmail}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        alertEmail: event.target.value,
+                      }))
+                    }
+                    type="email"
+                    placeholder="you@business.com"
+                    className="mt-3 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none transition-all duration-200 focus:border-indigo-500 disabled:bg-gray-100"
+                    disabled={!settings.newReviewAlertsEnabled}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 text-sm text-gray-600">
+              Account status:{" "}
+              <span className="font-semibold">{session?.user?.subscriptionStatus}</span> | Trial
+              ends:{" "}
               <span className="font-semibold">
                 {session?.user?.trialEndsAt ? formatDate(session.user.trialEndsAt) : "Not set"}
               </span>
-            </p>
+            </div>
           </section>
         </main>
       </div>

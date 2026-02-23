@@ -28,6 +28,16 @@ const ReviewSchema = new Schema(
       required: true,
       trim: true,
     },
+    locationId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    locationName: {
+      type: String,
+      default: "Primary Location",
+      trim: true,
+    },
     generatedReply: {
       type: String,
       default: "",
@@ -39,6 +49,10 @@ const ReviewSchema = new Schema(
       index: true,
     },
     postedAt: {
+      type: Date,
+      default: null,
+    },
+    alertSentAt: {
       type: Date,
       default: null,
     },

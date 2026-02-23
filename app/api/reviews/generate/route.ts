@@ -1,13 +1,42 @@
 import { authOptions } from "@/lib/auth";
+import { decryptSecret } from "@/lib/crypto";
 import { connectToDatabase } from "@/lib/db";
-import { getOpenAIClient } from "@/lib/openai";
+import { postReplyToGoogle } from "@/lib/google";
+import { generateReplyText } from "@/lib/reply";
 import Review from "@/models/Review";
+import User from "@/models/User";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
-const SYSTEM_PROMPT = `You are a professional, warm, and friendly business owner responding to a Google review. Write a genuine, human-sounding reply in under 100 words. Match the tone to the star rating: enthusiastic and grateful for 4-5 stars, empathetic and solution-focused for 1-3 stars. Never sound corporate or robotic. Never mention you are AI. Use the reviewer's first name if available.`;
-
 export const dynamic = "force-dynamic";
+
+function serializeReview(review: {
+  _id: { toString(): string };
+  reviewId: string;
+  reviewerName: string;
+  rating: number;
+  reviewText: string;
+  generatedReply: string;
+  status: "pending" | "generated" | "posted";
+  postedAt: Date | null;
+  createdAt: Date;
+  locationId?: string | null;
+  locationName?: string | null;
+}) {
+  return {
+    _id: review._id.toString(),
+    reviewId: review.reviewId,
+    reviewerName: review.reviewerName,
+    rating: review.rating,
+    reviewText: review.reviewText,
+    generatedReply: review.generatedReply,
+    status: review.status,
+    postedAt: review.postedAt ? new Date(review.postedAt).toISOString() : null,
+    createdAt: new Date(review.createdAt).toISOString(),
+    locationId: review.locationId ?? null,
+    locationName: review.locationName ?? "Primary Location",
+  };
+}
 
 export async function POST(request: Request) {
   try {
@@ -23,35 +52,23 @@ export async function POST(request: Request) {
 
     await connectToDatabase();
 
-    const review = await Review.findOne({
-      _id: body.reviewId,
-      userId: session.user.id,
-    });
+    const [review, user] = await Promise.all([
+      Review.findOne({
+        _id: body.reviewId,
+        userId: session.user.id,
+      }),
+      User.findById(session.user.id).select("googleAccessToken autoPostReplies"),
+    ]);
 
-    if (!review) {
-      return NextResponse.json({ error: "Review not found" }, { status: 404 });
+    if (!review || !user) {
+      return NextResponse.json({ error: "Review or user not found" }, { status: 404 });
     }
 
-    const openai = getOpenAIClient();
-    const firstName = review.reviewerName.split(" ")[0] ?? "there";
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      temperature: 0.7,
-      max_tokens: 180,
-      messages: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT,
-        },
-        {
-          role: "user",
-          content: `Reviewer first name: ${firstName}\nStar rating: ${review.rating}\nReview text: ${review.reviewText}`,
-        },
-      ],
+    const generatedReply = await generateReplyText({
+      reviewerName: review.reviewerName,
+      rating: review.rating,
+      reviewText: review.reviewText,
     });
-
-    const generatedReply = completion.choices[0]?.message?.content?.trim();
 
     if (!generatedReply) {
       return NextResponse.json({ error: "Failed to generate reply" }, { status: 500 });
@@ -59,20 +76,38 @@ export async function POST(request: Request) {
 
     review.generatedReply = generatedReply;
     review.status = "generated";
+    review.postedAt = null;
+
+    let autoPosted = false;
+    let autoPostWarning: string | null = null;
+
+    if (user.autoPostReplies) {
+      try {
+        const googleResult = await postReplyToGoogle({
+          accessToken: decryptSecret(user.googleAccessToken),
+          reviewId: review.reviewId,
+          replyText: generatedReply,
+        });
+
+        if (googleResult.posted) {
+          review.status = "posted";
+          review.postedAt = new Date();
+          autoPosted = true;
+        } else {
+          autoPostWarning = googleResult.reason ?? "Auto-posting was skipped.";
+        }
+      } catch (error) {
+        console.error("Auto-post on generation failed:", error);
+        autoPostWarning = "Auto-posting failed. You can still post it manually.";
+      }
+    }
+
     await review.save();
 
     return NextResponse.json({
-      review: {
-        _id: review._id.toString(),
-        reviewId: review.reviewId,
-        reviewerName: review.reviewerName,
-        rating: review.rating,
-        reviewText: review.reviewText,
-        generatedReply: review.generatedReply,
-        status: review.status,
-        postedAt: review.postedAt ? new Date(review.postedAt).toISOString() : null,
-        createdAt: new Date(review.createdAt).toISOString(),
-      },
+      review: serializeReview(review),
+      autoPosted,
+      warning: autoPostWarning,
     });
   } catch (error) {
     console.error("Generate reply failed:", error);

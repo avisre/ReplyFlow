@@ -1,4 +1,5 @@
 import { authOptions } from "@/lib/auth";
+import { decryptSecret } from "@/lib/crypto";
 import { connectToDatabase } from "@/lib/db";
 import { postReplyToGoogle } from "@/lib/google";
 import Review from "@/models/Review";
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
     }
 
     const googleResult = await postReplyToGoogle({
-      accessToken: user.googleAccessToken,
+      accessToken: decryptSecret(user.googleAccessToken),
       reviewId: review.reviewId,
       replyText,
     });
@@ -74,6 +75,8 @@ export async function POST(request: Request) {
         status: review.status,
         postedAt: review.postedAt ? new Date(review.postedAt).toISOString() : null,
         createdAt: new Date(review.createdAt).toISOString(),
+        locationId: review.locationId ?? null,
+        locationName: review.locationName ?? "Primary Location",
       },
       message: "Reply posted successfully.",
     });

@@ -4,6 +4,17 @@ export type ExternalReview = {
   rating: number;
   reviewText: string;
   createdAt: Date;
+  locationId: string;
+  locationName: string;
+};
+
+type GoogleAccount = {
+  name?: string;
+};
+
+type GoogleLocation = {
+  name?: string;
+  title?: string;
 };
 
 type GoogleReview = {
@@ -41,6 +52,8 @@ const demoReviews: ExternalReview[] = [
     reviewText:
       "Amazing service and super friendly staff. They made the whole process easy and quick.",
     createdAt: new Date(Date.now() - 1_000 * 60 * 60 * 12),
+    locationId: "demo-location-main",
+    locationName: "Downtown Location",
   },
   {
     reviewId: "demo-102",
@@ -49,6 +62,8 @@ const demoReviews: ExternalReview[] = [
     reviewText:
       "Good experience overall, but wait time was a bit longer than expected.",
     createdAt: new Date(Date.now() - 1_000 * 60 * 60 * 24),
+    locationId: "demo-location-main",
+    locationName: "Downtown Location",
   },
   {
     reviewId: "demo-103",
@@ -57,11 +72,120 @@ const demoReviews: ExternalReview[] = [
     reviewText:
       "I was disappointed with the communication. Hoping this can be improved in the future.",
     createdAt: new Date(Date.now() - 1_000 * 60 * 60 * 48),
+    locationId: "demo-location-east",
+    locationName: "Eastside Location",
   },
 ];
 
 export function getDemoReviews() {
   return demoReviews;
+}
+
+async function fetchJson<T>(url: string, accessToken: string) {
+  const response = await fetch(url, {
+    headers: googleHeaders(accessToken),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google API failed (${response.status}): ${url}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function fetchAccounts(accessToken: string) {
+  const accounts: GoogleAccount[] = [];
+  let pageToken: string | null = null;
+
+  do {
+    const url = new URL("https://mybusinessaccountmanagement.googleapis.com/v1/accounts");
+    url.searchParams.set("pageSize", "20");
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
+    }
+
+    const data = await fetchJson<{ accounts?: GoogleAccount[]; nextPageToken?: string }>(
+      url.toString(),
+      accessToken,
+    );
+
+    accounts.push(...(data.accounts ?? []));
+    pageToken = data.nextPageToken ?? null;
+  } while (pageToken);
+
+  return accounts;
+}
+
+async function fetchLocationsForAccount(accessToken: string, accountName: string) {
+  const locations: GoogleLocation[] = [];
+  let pageToken: string | null = null;
+
+  do {
+    const url = new URL(
+      `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations`,
+    );
+    url.searchParams.set("pageSize", "100");
+    url.searchParams.set("readMask", "name,title");
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
+    }
+
+    const data = await fetchJson<{ locations?: GoogleLocation[]; nextPageToken?: string }>(
+      url.toString(),
+      accessToken,
+    );
+
+    locations.push(...(data.locations ?? []));
+    pageToken = data.nextPageToken ?? null;
+  } while (pageToken);
+
+  return locations;
+}
+
+async function fetchUnrepliedReviewsForLocation(
+  accessToken: string,
+  location: GoogleLocation,
+): Promise<ExternalReview[]> {
+  if (!location.name) {
+    return [];
+  }
+
+  const reviews: ExternalReview[] = [];
+  let pageToken: string | null = null;
+
+  do {
+    const url = new URL(`https://mybusiness.googleapis.com/v4/${location.name}/reviews`);
+    url.searchParams.set("orderBy", "updateTime desc");
+    url.searchParams.set("pageSize", "50");
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
+    }
+
+    const data = await fetchJson<{ reviews?: GoogleReview[]; nextPageToken?: string }>(
+      url.toString(),
+      accessToken,
+    );
+
+    const locationName = location.title ?? location.name.split("/").at(-1) ?? "Primary Location";
+
+    const normalized = (data.reviews ?? [])
+      .filter((review) => !review.reviewReply?.comment)
+      .map((review) => ({
+        reviewId: review.name ?? review.reviewId ?? `google-${crypto.randomUUID()}`,
+        reviewerName: review.reviewer?.displayName ?? "Google User",
+        rating: ratingMap[review.starRating ?? "THREE"] ?? 3,
+        reviewText: review.comment ?? "No text provided.",
+        createdAt: review.createTime ? new Date(review.createTime) : new Date(),
+        locationId: location.name ?? "unknown-location",
+        locationName,
+      }));
+
+    reviews.push(...normalized);
+    pageToken = data.nextPageToken ?? null;
+  } while (pageToken);
+
+  return reviews;
 }
 
 export async function fetchUnansweredReviewsFromGoogle(
@@ -72,73 +196,37 @@ export async function fetchUnansweredReviewsFromGoogle(
   }
 
   try {
-    const accountsRes = await fetch(
-      "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-      {
-        headers: googleHeaders(accessToken),
-        cache: "no-store",
-      },
-    );
-
-    if (!accountsRes.ok) {
-      throw new Error(`Account fetch failed: ${accountsRes.status}`);
-    }
-
-    const accountsData = (await accountsRes.json()) as {
-      accounts?: Array<{ name?: string }>;
-    };
-
-    const accountName = accountsData.accounts?.[0]?.name;
-    if (!accountName) {
+    const accounts = await fetchAccounts(accessToken);
+    if (accounts.length === 0) {
       return [];
     }
 
-    const locationsRes = await fetch(
-      `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?pageSize=10`,
-      {
-        headers: googleHeaders(accessToken),
-        cache: "no-store",
-      },
-    );
+    const allReviews: ExternalReview[] = [];
 
-    if (!locationsRes.ok) {
-      throw new Error(`Location fetch failed: ${locationsRes.status}`);
+    for (const account of accounts) {
+      if (!account.name) {
+        continue;
+      }
+
+      let locations: GoogleLocation[] = [];
+      try {
+        locations = await fetchLocationsForAccount(accessToken, account.name);
+      } catch (error) {
+        console.error(`Location fetch failed for ${account.name}:`, error);
+        continue;
+      }
+
+      for (const location of locations) {
+        try {
+          const locationReviews = await fetchUnrepliedReviewsForLocation(accessToken, location);
+          allReviews.push(...locationReviews);
+        } catch (error) {
+          console.error(`Review fetch failed for ${location.name ?? "unknown location"}:`, error);
+        }
+      }
     }
 
-    const locationsData = (await locationsRes.json()) as {
-      locations?: Array<{ name?: string }>;
-    };
-
-    const locationName = locationsData.locations?.[0]?.name;
-    if (!locationName) {
-      return [];
-    }
-
-    const reviewsRes = await fetch(
-      `https://mybusiness.googleapis.com/v4/${locationName}/reviews?orderBy=updateTime%20desc`,
-      {
-        headers: googleHeaders(accessToken),
-        cache: "no-store",
-      },
-    );
-
-    if (!reviewsRes.ok) {
-      throw new Error(`Reviews fetch failed: ${reviewsRes.status}`);
-    }
-
-    const reviewsData = (await reviewsRes.json()) as {
-      reviews?: GoogleReview[];
-    };
-
-    return (reviewsData.reviews ?? [])
-      .filter((review) => !review.reviewReply?.comment)
-      .map((review) => ({
-        reviewId: review.name ?? review.reviewId ?? `google-${crypto.randomUUID()}`,
-        reviewerName: review.reviewer?.displayName ?? "Google User",
-        rating: ratingMap[review.starRating ?? "THREE"] ?? 3,
-        reviewText: review.comment ?? "No text provided.",
-        createdAt: review.createTime ? new Date(review.createTime) : new Date(),
-      }));
+    return allReviews;
   } catch (error) {
     console.error("Google reviews sync failed:", error);
     return [];

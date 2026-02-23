@@ -51,6 +51,7 @@ export async function POST(request: Request) {
       name,
       email,
       passwordHash,
+      alertEmail: email,
       subscriptionStatus: "trialing",
       trialEndsAt,
     });

@@ -5,12 +5,21 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
+      - key: NODE_VERSION
+        value: 20.19.0
       - key: MONGODB_URI
       - key: NEXTAUTH_SECRET
       - key: NEXTAUTH_URL
+      - key: TOKEN_ENCRYPTION_KEY
       - key: GOOGLE_CLIENT_ID
       - key: GOOGLE_CLIENT_SECRET
       - key: OPENAI_API_KEY
       - key: STRIPE_SECRET_KEY
       - key: STRIPE_WEBHOOK_SECRET
       - key: STRIPE_PRICE_ID
+      - key: SMTP_HOST
+      - key: SMTP_PORT
+      - key: SMTP_USER
+      - key: SMTP_PASS
+      - key: SMTP_SECURE
+      - key: SMTP_FROM_EMAIL
