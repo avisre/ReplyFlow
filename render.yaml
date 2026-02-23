@@ -11,10 +11,13 @@ services:
       - key: NEXTAUTH_SECRET
       - key: NEXTAUTH_URL
       - key: TOKEN_ENCRYPTION_KEY
+      - key: AI_PROVIDER
       - key: GOOGLE_CLIENT_ID
       - key: GOOGLE_CLIENT_SECRET
       - key: OPENAI_API_KEY
-      - key: OPENAI_REPLY_MODELS
+      - key: GEMINI_API_KEY
+      - key: GEMINI_BASE_URL
+      - key: AI_REPLY_MODELS
       - key: STRIPE_SECRET_KEY
       - key: STRIPE_WEBHOOK_SECRET
       - key: STRIPE_PRICE_ID

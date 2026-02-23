@@ -1,4 +1,4 @@
-import { getOpenAIClient } from "@/lib/openai";
+import { getAIProvider, getOpenAIClient } from "@/lib/openai";
 
 export const REPLY_SYSTEM_PROMPT = `You are a professional, warm, and friendly business owner responding to a Google review. Write a genuine, human-sounding reply in under 100 words. Match the tone to the star rating: enthusiastic and grateful for 4-5 stars, empathetic and solution-focused for 1-3 stars. Never sound corporate or robotic. Never mention you are AI. Use the reviewer's first name if available.`;
 
@@ -15,6 +15,9 @@ export class ReplyGenerationError extends Error {
 }
 
 function normalizeOpenAIError(error: unknown) {
+  const provider = getAIProvider();
+  const providerName = provider === "gemini" ? "Gemini" : "OpenAI";
+  const apiKeyName = provider === "gemini" ? "GEMINI_API_KEY" : "OPENAI_API_KEY";
   const status = typeof error === "object" && error && "status" in error
     ? Number((error as { status?: number }).status)
     : 500;
@@ -25,7 +28,7 @@ function normalizeOpenAIError(error: unknown) {
 
   if (code === "insufficient_quota") {
     return new ReplyGenerationError(
-      "OpenAI quota exceeded. Add credits or billing to your OpenAI project, then try again.",
+      `${providerName} quota exceeded. Add credits or billing, then try again.`,
       429,
       code,
     );
@@ -33,7 +36,7 @@ function normalizeOpenAIError(error: unknown) {
 
   if (code === "invalid_api_key" || status === 401) {
     return new ReplyGenerationError(
-      "OpenAI API key is invalid or missing permissions. Update OPENAI_API_KEY.",
+      `${providerName} API key is invalid or missing permissions. Update ${apiKeyName}.`,
       401,
       code,
     );
@@ -41,7 +44,7 @@ function normalizeOpenAIError(error: unknown) {
 
   if (status === 429) {
     return new ReplyGenerationError(
-      "OpenAI rate limit reached. Please retry in a few seconds.",
+      `${providerName} rate limit reached. Please retry in a few seconds.`,
       429,
       code,
     );
@@ -49,13 +52,23 @@ function normalizeOpenAIError(error: unknown) {
 
   if (status === 404 || code === "model_not_found") {
     return new ReplyGenerationError(
-      "Configured OpenAI model is unavailable for this account.",
+      `Configured ${providerName} model is unavailable for this account.`,
       400,
       code,
     );
   }
 
-  return new ReplyGenerationError("Failed to generate reply with OpenAI.", 500, code);
+  return new ReplyGenerationError(`Failed to generate reply with ${providerName}.`, 500, code);
+}
+
+function getDefaultModelList() {
+  const provider = getAIProvider();
+
+  if (provider === "gemini") {
+    return "gemini-2.5-flash,gemini-2.0-flash,gemini-1.5-flash";
+  }
+
+  return "gpt-4o,gpt-4o-mini";
 }
 
 export async function generateReplyText({
@@ -69,7 +82,11 @@ export async function generateReplyText({
 }) {
   const openai = getOpenAIClient();
   const firstName = reviewerName.split(" ")[0] ?? "there";
-  const models = (process.env.OPENAI_REPLY_MODELS ?? "gpt-4o,gpt-4o-mini")
+  const models = (
+    process.env.AI_REPLY_MODELS ??
+    process.env.OPENAI_REPLY_MODELS ??
+    getDefaultModelList()
+  )
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
@@ -114,5 +131,5 @@ export async function generateReplyText({
     throw lastError;
   }
 
-  throw new ReplyGenerationError("OpenAI returned an empty reply.", 500, "empty_response");
+  throw new ReplyGenerationError("AI provider returned an empty reply.", 500, "empty_response");
 }
