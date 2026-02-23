@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: replyflow
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: MONGODB_URI
+      - key: NEXTAUTH_SECRET
+      - key: NEXTAUTH_URL
+      - key: GOOGLE_CLIENT_ID
+      - key: GOOGLE_CLIENT_SECRET
+      - key: OPENAI_API_KEY
+      - key: STRIPE_SECRET_KEY
+      - key: STRIPE_WEBHOOK_SECRET
+      - key: STRIPE_PRICE_ID

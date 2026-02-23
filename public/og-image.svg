@@ -1,0 +1,16 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="120" y="120" width="960" height="390" rx="28" fill="white" fill-opacity="0.98"/>
+  <rect x="170" y="175" width="300" height="30" rx="15" fill="#EEF2FF"/>
+  <rect x="170" y="225" width="860" height="68" rx="16" fill="#F9FAFB"/>
+  <rect x="170" y="309" width="860" height="68" rx="16" fill="#F9FAFB"/>
+  <rect x="170" y="393" width="860" height="68" rx="16" fill="#F9FAFB"/>
+  <text x="170" y="105" fill="white" font-family="Inter, Arial, sans-serif" font-size="56" font-weight="700">ReplyFlow</text>
+  <text x="170" y="555" fill="#E0E7FF" font-family="Inter, Arial, sans-serif" font-size="30">AI-powered Google review replies in seconds</text>
+</svg>
