@@ -54,7 +54,7 @@ export default function RegisterForm() {
       }
 
       toast.success("Welcome to ReplyFlow.");
-      router.push(result?.url ?? "/dashboard");
+      router.push("/dashboard");
       router.refresh();
     } catch (error) {
       console.error(error);
