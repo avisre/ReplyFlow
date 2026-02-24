@@ -22,6 +22,7 @@ import {
   Search,
   Settings,
   Star,
+  Trash2,
   X,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
@@ -52,6 +53,13 @@ type SettingsState = {
   alertEmail: string;
 };
 
+type GeneratedReplyOption = {
+  key: "quick_pro" | "warm_personal" | "growth_recovery";
+  label: string;
+  text: string;
+  wordCount: number;
+};
+
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "Reviews", icon: MessageSquare, href: "/dashboard#reviews" },
@@ -69,9 +77,13 @@ export default function DashboardApp() {
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [generatingReviewId, setGeneratingReviewId] = useState<string | null>(null);
   const [postingReviewId, setPostingReviewId] = useState<string | null>(null);
+  const [deletingDraftReviewId, setDeletingDraftReviewId] = useState<string | null>(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [replyOptionsByReviewId, setReplyOptionsByReviewId] = useState<
+    Record<string, GeneratedReplyOption[]>
+  >({});
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [search, setSearch] = useState("");
   const [settings, setSettings] = useState<SettingsState>({
@@ -98,7 +110,26 @@ export default function DashboardApp() {
         throw new Error(data.error ?? "Failed to fetch reviews");
       }
 
-      setReviews(data.reviews ?? []);
+      const nextReviews = data.reviews ?? [];
+      setReviews(nextReviews);
+      setReplyOptionsByReviewId(() => {
+        const initialOptions: Record<string, GeneratedReplyOption[]> = {};
+
+        for (const review of nextReviews) {
+          if (review.status === "generated" && review.generatedReply.trim()) {
+            initialOptions[review._id] = [
+              {
+                key: "warm_personal",
+                label: "Warm Personal",
+                text: review.generatedReply,
+                wordCount: review.generatedReply.trim().split(/\s+/).filter(Boolean).length,
+              },
+            ];
+          }
+        }
+
+        return initialOptions;
+      });
     } catch (error) {
       console.error(error);
       toast.error("Unable to load reviews.");
@@ -161,6 +192,34 @@ export default function DashboardApp() {
     );
   };
 
+  const normalizeOptions = (
+    options: GeneratedReplyOption[] | undefined,
+    fallbackReply: string,
+  ): GeneratedReplyOption[] => {
+    const filtered: GeneratedReplyOption[] =
+      options?.filter((option) => option.text.trim()).map((option) => ({
+        ...option,
+        wordCount: option.wordCount || option.text.trim().split(/\s+/).filter(Boolean).length,
+      })) ?? [];
+
+    if (filtered.length > 0) {
+      return filtered;
+    }
+
+    if (!fallbackReply.trim()) {
+      return [];
+    }
+
+    return [
+      {
+        key: "warm_personal",
+        label: "Warm Personal",
+        text: fallbackReply,
+        wordCount: fallbackReply.trim().split(/\s+/).filter(Boolean).length,
+      },
+    ];
+  };
+
   const handleGenerateReply = async (reviewId: string) => {
     setGeneratingReviewId(reviewId);
 
@@ -175,6 +234,7 @@ export default function DashboardApp() {
 
       const data = (await response.json()) as {
         review?: ReviewItem;
+        options?: GeneratedReplyOption[];
         autoPosted?: boolean;
         warning?: string | null;
         error?: string;
@@ -184,10 +244,24 @@ export default function DashboardApp() {
       }
 
       updateReview(data.review);
+      const normalizedOptions = normalizeOptions(data.options, data.review.generatedReply);
+      setReplyOptionsByReviewId((current) => ({
+        ...current,
+        [reviewId]: normalizedOptions,
+      }));
       if (data.autoPosted) {
+        setReplyOptionsByReviewId((current) => {
+          const next = { ...current };
+          delete next[reviewId];
+          return next;
+        });
         toast.success("Reply generated and auto-posted.");
       } else {
-        toast.success("Reply generated.");
+        toast.success(
+          normalizedOptions.length >= 3
+            ? "3 professional reply options generated."
+            : "Reply generated.",
+        );
       }
 
       if (data.warning) {
@@ -209,9 +283,19 @@ export default function DashboardApp() {
     );
   };
 
+  const handleSelectOption = (reviewId: string, optionText: string) => {
+    handleReplyTextChange(reviewId, optionText);
+  };
+
   const handleApproveAndPost = async (reviewId: string) => {
     const targetReview = reviews.find((review) => review._id === reviewId);
     if (!targetReview) {
+      return;
+    }
+
+    const replyText = targetReview.generatedReply.trim();
+    if (!replyText) {
+      toast.error("Reply cannot be empty.");
       return;
     }
 
@@ -225,7 +309,7 @@ export default function DashboardApp() {
         },
         body: JSON.stringify({
           reviewId,
-          replyText: targetReview.generatedReply,
+          replyText,
         }),
       });
 
@@ -235,12 +319,56 @@ export default function DashboardApp() {
       }
 
       updateReview(data.review);
+      setReplyOptionsByReviewId((current) => {
+        const next = { ...current };
+        delete next[reviewId];
+        return next;
+      });
       toast.success("Reply approved and posted.");
     } catch (error) {
       console.error(error);
       toast.error("Unable to post this reply.");
     } finally {
       setPostingReviewId(null);
+    }
+  };
+
+  const handleDeleteDraft = async (reviewId: string) => {
+    setDeletingDraftReviewId(reviewId);
+
+    try {
+      const response = await fetch("/api/reviews/draft", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reviewId,
+          action: "delete",
+        }),
+      });
+
+      const data = (await response.json()) as {
+        review?: ReviewItem;
+        error?: string;
+      };
+
+      if (!response.ok || !data.review) {
+        throw new Error(data.error ?? "Failed to delete draft");
+      }
+
+      updateReview(data.review);
+      setReplyOptionsByReviewId((current) => {
+        const next = { ...current };
+        delete next[reviewId];
+        return next;
+      });
+      toast.success("Draft deleted.");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Unable to delete draft.");
+    } finally {
+      setDeletingDraftReviewId(null);
     }
   };
 
@@ -656,7 +784,9 @@ export default function DashboardApp() {
                 {filteredReviews.map((review) => {
                   const isGenerating = generatingReviewId === review._id;
                   const isPosting = postingReviewId === review._id;
+                  const isDeletingDraft = deletingDraftReviewId === review._id;
                   const isAwaiting = review.status === "pending" || review.status === "generated";
+                  const reviewOptions = replyOptionsByReviewId[review._id] ?? [];
 
                   return (
                     <article key={review._id} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -721,24 +851,49 @@ export default function DashboardApp() {
                               Generating...
                             </>
                           ) : (
-                            "Generate Reply"
+                            "Generate 3 Reply Options"
                           )}
                         </button>
                       ) : null}
 
                       {review.status === "generated" ? (
                         <div className="mt-4 space-y-3">
+                          {reviewOptions.length > 0 ? (
+                            <div className="grid gap-2 md:grid-cols-3">
+                              {reviewOptions.map((option) => {
+                                const isSelected = review.generatedReply.trim() === option.text.trim();
+
+                                return (
+                                  <button
+                                    key={`${review._id}-${option.key}`}
+                                    type="button"
+                                    onClick={() => handleSelectOption(review._id, option.text)}
+                                    className={cn(
+                                      "rounded-xl border px-3 py-2 text-left transition-all duration-200",
+                                      isSelected
+                                        ? "border-indigo-500 bg-indigo-50"
+                                        : "border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40",
+                                    )}
+                                  >
+                                    <p className="text-xs font-semibold text-indigo-700">{option.label}</p>
+                                    <p className="mt-1 text-xs text-gray-500">{option.wordCount} words</p>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+
                           <textarea
                             value={review.generatedReply}
                             onChange={(event) => handleReplyTextChange(review._id, event.target.value)}
                             rows={4}
                             className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm outline-none transition-all duration-200 focus:border-indigo-500"
                           />
-                          <div className="flex flex-col gap-2 sm:flex-row">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                             <button
                               type="button"
                               onClick={() => handleApproveAndPost(review._id)}
-                              disabled={isPosting}
+                              disabled={isPosting || isDeletingDraft}
                               className="btn-base rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
                             >
                               {isPosting ? (
@@ -754,7 +909,7 @@ export default function DashboardApp() {
                             <button
                               type="button"
                               onClick={() => handleGenerateReply(review._id)}
-                              disabled={isGenerating}
+                              disabled={isGenerating || isPosting || isDeletingDraft}
                               className="btn-secondary"
                             >
                               {isGenerating ? (
@@ -763,7 +918,26 @@ export default function DashboardApp() {
                                   Regenerating...
                                 </>
                               ) : (
-                                "Regenerate"
+                                "Regenerate 3 Options"
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteDraft(review._id)}
+                              disabled={isDeletingDraft || isGenerating || isPosting}
+                              className="btn-base rounded-full border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                            >
+                              {isDeletingDraft ? (
+                                <>
+                                  <LoadingSpinner className="text-red-600" />
+                                  Deleting...
+                                </>
+                              ) : (
+                                <>
+                                  <Trash2 className="h-4 w-4" />
+                                  Delete Draft
+                                </>
                               )}
                             </button>
                           </div>

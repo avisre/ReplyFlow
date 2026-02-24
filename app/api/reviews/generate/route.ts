@@ -2,7 +2,7 @@ import { authOptions } from "@/lib/auth";
 import { decryptSecret } from "@/lib/crypto";
 import { connectToDatabase } from "@/lib/db";
 import { postReplyToGoogle } from "@/lib/google";
-import { generateReplyText, ReplyGenerationError } from "@/lib/reply";
+import { ReplyGenerationError, generateReplyOptions } from "@/lib/reply";
 import Review from "@/models/Review";
 import User from "@/models/User";
 import { getServerSession } from "next-auth";
@@ -64,11 +64,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Review or user not found" }, { status: 404 });
     }
 
-    const generatedReply = await generateReplyText({
+    const generatedOptions = await generateReplyOptions({
       reviewerName: review.reviewerName,
       rating: review.rating,
       reviewText: review.reviewText,
     });
+    const generatedReply = generatedOptions[0]?.text ?? "";
 
     if (!generatedReply) {
       return NextResponse.json({ error: "Failed to generate reply" }, { status: 500 });
@@ -106,6 +107,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       review: serializeReview(review),
+      options: generatedOptions,
       autoPosted,
       warning: autoPostWarning,
     });

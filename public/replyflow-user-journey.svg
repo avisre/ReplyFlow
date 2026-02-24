@@ -1,0 +1,161 @@
+<svg width="1900" height="1220" viewBox="0 0 1900 1220" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EEF2FF" />
+      <stop offset="100%" stop-color="#ECFDF5" />
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#374151" />
+    </marker>
+    <style>
+      .title { font: 700 38px Inter, Arial, sans-serif; fill: #111827; }
+      .subtitle { font: 500 17px Inter, Arial, sans-serif; fill: #4B5563; }
+      .lane { font: 700 22px Inter, Arial, sans-serif; fill: #111827; }
+      .stepTitle { font: 700 17px Inter, Arial, sans-serif; fill: #111827; }
+      .stepBody { font: 500 14px Inter, Arial, sans-serif; fill: #374151; }
+      .mini { font: 600 12px Inter, Arial, sans-serif; fill: #4B5563; }
+      .line { stroke: #374151; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+      .dashed { stroke: #6B7280; stroke-width: 2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1900" height="1220" fill="url(#bg)" />
+
+  <text x="56" y="68" class="title">ReplyFlow - User Journey (Start to Finish)</text>
+  <text x="56" y="98" class="subtitle">How a user moves from landing page to posted Google reply and subscription billing</text>
+
+  <rect x="40" y="130" width="1820" height="1020" rx="24" fill="#FFFFFF" stroke="#E5E7EB" />
+
+  <rect x="60" y="160" width="560" height="960" rx="18" fill="#F9FAFB" stroke="#E5E7EB" />
+  <rect x="670" y="160" width="560" height="960" rx="18" fill="#F9FAFB" stroke="#E5E7EB" />
+  <rect x="1280" y="160" width="560" height="960" rx="18" fill="#F9FAFB" stroke="#E5E7EB" />
+
+  <text x="90" y="205" class="lane">1) User in Browser</text>
+  <text x="700" y="205" class="lane">2) ReplyFlow App (Next.js + MongoDB)</text>
+  <text x="1310" y="205" class="lane">3) External Services</text>
+
+  <!-- User column steps -->
+  <rect x="90" y="250" width="500" height="100" rx="16" fill="#EEF2FF" stroke="#C7D2FE" />
+  <text x="110" y="282" class="stepTitle">A. Visits landing page /</text>
+  <text x="110" y="306" class="stepBody">Reads value proposition and clicks Start Free Trial</text>
+  <text x="110" y="328" class="mini">CTA: Start Free Trial / Login</text>
+
+  <rect x="90" y="390" width="500" height="118" rx="16" fill="#EEF2FF" stroke="#C7D2FE" />
+  <text x="110" y="422" class="stepTitle">B. Signs up or logs in</text>
+  <text x="110" y="446" class="stepBody">Chooses Google OAuth or email/password registration</text>
+  <text x="110" y="468" class="stepBody">Then enters dashboard</text>
+  <text x="110" y="490" class="mini">Protected route: /dashboard</text>
+
+  <rect x="90" y="550" width="500" height="138" rx="16" fill="#EEF2FF" stroke="#C7D2FE" />
+  <text x="110" y="582" class="stepTitle">C. Handles reviews in dashboard</text>
+  <text x="110" y="606" class="stepBody">Clicks Generate 3 Reply Options</text>
+  <text x="110" y="628" class="stepBody">Selects one: Quick Pro / Warm Personal / Growth-Recovery</text>
+  <text x="110" y="650" class="stepBody">Edits text, deletes draft, or regenerates</text>
+  <text x="110" y="672" class="mini">Full control before posting</text>
+
+  <rect x="90" y="730" width="500" height="116" rx="16" fill="#EEF2FF" stroke="#C7D2FE" />
+  <text x="110" y="762" class="stepTitle">D. Approves and posts</text>
+  <text x="110" y="786" class="stepBody">Clicks Approve &amp; Post when satisfied</text>
+  <text x="110" y="808" class="stepBody">Sees posted badge and timestamp in feed</text>
+  <text x="110" y="830" class="mini">Status moves to posted</text>
+
+  <rect x="90" y="888" width="500" height="186" rx="16" fill="#EEF2FF" stroke="#C7D2FE" />
+  <text x="110" y="920" class="stepTitle">E. Subscription lifecycle</text>
+  <text x="110" y="944" class="stepBody">During trial: full usage</text>
+  <text x="110" y="966" class="stepBody">After trial ends: upgrade modal appears</text>
+  <text x="110" y="988" class="stepBody">Completes Stripe checkout for paid plan</text>
+  <text x="110" y="1010" class="stepBody">Manages plan via billing portal</text>
+  <text x="110" y="1032" class="mini">$29/month plan + webhook updates status</text>
+
+  <!-- App column steps -->
+  <rect x="720" y="250" width="460" height="110" rx="16" fill="#ECFDF5" stroke="#A7F3D0" />
+  <text x="742" y="282" class="stepTitle">1. Renders marketing page</text>
+  <text x="742" y="306" class="stepBody">Navbar, hero, social proof, features, pricing, FAQ</text>
+  <text x="742" y="328" class="mini">Next.js App Router + Tailwind</text>
+
+  <rect x="720" y="390" width="460" height="124" rx="16" fill="#ECFDF5" stroke="#A7F3D0" />
+  <text x="742" y="422" class="stepTitle">2. Creates/authenticates account</text>
+  <text x="742" y="446" class="stepBody">POST /api/auth/register or NextAuth callback</text>
+  <text x="742" y="468" class="stepBody">Creates user, trial status, encrypted credentials</text>
+  <text x="742" y="492" class="mini">Middleware protects /dashboard and /billing</text>
+
+  <rect x="720" y="550" width="460" height="136" rx="16" fill="#ECFDF5" stroke="#A7F3D0" />
+  <text x="742" y="582" class="stepTitle">3. Syncs reviews and builds feed</text>
+  <text x="742" y="606" class="stepBody">GET /api/reviews pulls unanswered reviews</text>
+  <text x="742" y="628" class="stepBody">Stores/syncs review docs in MongoDB</text>
+  <text x="742" y="650" class="stepBody">Shows pending/generated/posted states</text>
+  <text x="742" y="672" class="mini">Search, filters, stats, trend cards</text>
+
+  <rect x="720" y="730" width="460" height="156" rx="16" fill="#ECFDF5" stroke="#A7F3D0" />
+  <text x="742" y="762" class="stepTitle">4. Generates AI reply options</text>
+  <text x="742" y="786" class="stepBody">POST /api/reviews/generate</text>
+  <text x="742" y="808" class="stepBody">Returns 3 options: Quick Pro, Warm Personal,</text>
+  <text x="742" y="830" class="stepBody">Growth-Recovery + editable draft state</text>
+  <text x="742" y="852" class="mini">Delete draft: POST /api/reviews/draft</text>
+  <text x="742" y="874" class="mini">Post reply: POST /api/reviews/post</text>
+
+  <rect x="720" y="930" width="460" height="144" rx="16" fill="#ECFDF5" stroke="#A7F3D0" />
+  <text x="742" y="962" class="stepTitle">5. Handles billing + access control</text>
+  <text x="742" y="986" class="stepBody">Creates Stripe checkout sessions and portal links</text>
+  <text x="742" y="1008" class="stepBody">Webhook updates subscriptionStatus in User model</text>
+  <text x="742" y="1030" class="stepBody">Shows upgrade modal when trial is over</text>
+  <text x="742" y="1052" class="mini">react-hot-toast + loading states throughout</text>
+
+  <!-- External services column -->
+  <rect x="1330" y="250" width="460" height="110" rx="16" fill="#FFFBEB" stroke="#FDE68A" />
+  <text x="1352" y="282" class="stepTitle">I. Google OAuth + Business Profile</text>
+  <text x="1352" y="306" class="stepBody">OAuth login and review/reply API operations</text>
+  <text x="1352" y="328" class="mini">Google auth + review data source</text>
+
+  <rect x="1330" y="400" width="460" height="108" rx="16" fill="#FFFBEB" stroke="#FDE68A" />
+  <text x="1352" y="432" class="stepTitle">II. AI Gateway / LLM endpoint</text>
+  <text x="1352" y="456" class="stepBody">Gemini-compatible generateContent endpoint</text>
+  <text x="1352" y="478" class="mini">Produces 3 professional reply options</text>
+
+  <rect x="1330" y="548" width="460" height="108" rx="16" fill="#FFFBEB" stroke="#FDE68A" />
+  <text x="1352" y="580" class="stepTitle">III. MongoDB Atlas</text>
+  <text x="1352" y="604" class="stepBody">Stores users, reviews, statuses, tokens, billing state</text>
+  <text x="1352" y="626" class="mini">Mongoose models: User, Review</text>
+
+  <rect x="1330" y="696" width="460" height="108" rx="16" fill="#FFFBEB" stroke="#FDE68A" />
+  <text x="1352" y="728" class="stepTitle">IV. Stripe</text>
+  <text x="1352" y="752" class="stepBody">Checkout + billing portal + webhook events</text>
+  <text x="1352" y="774" class="mini">Controls paid access after trial</text>
+
+  <!-- Horizontal flows -->
+  <path class="line" d="M590 300 L710 300" />
+  <path class="line" d="M1180 300 L1320 300" />
+
+  <path class="line" d="M590 445 L710 445" />
+  <path class="line" d="M1180 445 L1320 445" />
+
+  <path class="line" d="M590 620 L710 620" />
+  <path class="line" d="M1180 620 L1320 620" />
+
+  <path class="line" d="M590 790 L710 790" />
+  <path class="line" d="M1180 790 L1320 790" />
+
+  <path class="line" d="M590 980 L710 980" />
+  <path class="line" d="M1180 980 L1320 980" />
+
+  <!-- Vertical progression arrows -->
+  <path class="dashed" d="M340 350 L340 388" />
+  <path class="dashed" d="M340 508 L340 548" />
+  <path class="dashed" d="M340 688 L340 728" />
+  <path class="dashed" d="M340 846 L340 886" />
+
+  <path class="dashed" d="M950 360 L950 388" />
+  <path class="dashed" d="M950 514 L950 548" />
+  <path class="dashed" d="M950 686 L950 728" />
+  <path class="dashed" d="M950 886 L950 930" />
+
+  <path class="dashed" d="M1560 360 L1560 398" />
+  <path class="dashed" d="M1560 508 L1560 546" />
+  <path class="dashed" d="M1560 656 L1560 694" />
+
+  <!-- Footer summary -->
+  <rect x="60" y="1168" width="1780" height="34" rx="10" fill="#111827" />
+  <text x="80" y="1190" class="mini" fill="#F9FAFB">
+    Result: User sees review, gets 3 AI reply styles, edits safely, posts to Google, and stays subscribed via Stripe.
+  </text>
+</svg>
