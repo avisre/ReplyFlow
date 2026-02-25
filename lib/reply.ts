@@ -1,4 +1,4 @@
-export const REPLY_SYSTEM_PROMPT = `You are a professional, warm, and friendly business owner responding to a Google review. Write genuine, human-sounding replies in under 100 words. Match the tone to the star rating: enthusiastic and grateful for 4-5 stars, empathetic and solution-focused for 1-3 stars. Never sound corporate or robotic. Never mention you are AI. Use the reviewer's first name if available. Never include phone numbers, email addresses, website URLs, social handles, physical addresses, or directions. Do not ask users to call/email/visit a specific contact channel. If help is needed, use this exact line: "If you need any help or have any questions, please reach out."`;
+export const REPLY_SYSTEM_PROMPT = `You are a professional, warm, and friendly business owner responding to a Google review. Write genuine, human-sounding replies in under 100 words. Match the tone to the star rating: enthusiastic and grateful for 4-5 stars, empathetic and solution-focused for 1-3 stars. Never sound corporate or robotic. Never mention you are AI. Use the reviewer's first name if available. Never include phone numbers, email addresses, website URLs, social handles, physical addresses, or directions. Do not ask users to call/email/visit a specific contact channel. If help is needed, use this exact line: "If you need any help or have any questions, please reach out." Return only the final customer-facing reply text with no analysis, no planning notes, and no self-references.`;
 
 type GeminiApiError = {
   code?: number | string;
@@ -50,9 +50,21 @@ export type ReplyOption = {
   wordCount: number;
 };
 
+type ReplyStyle = "default" | "quick_pro" | "warm_personal" | "growth_recovery";
+
 const DEFAULT_MODEL_LIST = "gemini-2.5-flash,gemini-2.0-flash,gemini-2.0-flash-lite";
 const DEFAULT_TIMEOUT_MS = 12000;
 const DEFAULT_MAX_ATTEMPTS = 1;
+const INTERNAL_REASONING_PATTERNS = [
+  /\bthe user wants me to\b/i,
+  /\blet me break (it|this) down\b/i,
+  /\bi need to\b/i,
+  /\bfirst,\s*i see\b/i,
+  /\bword count requirement\b/i,
+  /\brequirements?\b/i,
+  /\bmy response should\b/i,
+  /\bhere'?s my (analysis|reasoning)\b/i,
+];
 
 function getGeminiApiBase() {
   const raw = process.env.GEMINI_API_BASE?.trim() || process.env.GEMINI_BASE_URL?.trim();
@@ -92,6 +104,12 @@ function getMaxAttempts() {
   }
 
   return DEFAULT_MAX_ATTEMPTS;
+}
+
+function getFirstName(name: string) {
+  const token = name.trim().split(/\s+/)[0] ?? "there";
+  const normalized = token.replace(/[^A-Za-z'-]/g, "");
+  return normalized || "there";
 }
 
 function normalizeGeminiError(error: unknown) {
@@ -214,6 +232,19 @@ function isLikelyIncompleteReply(text: string) {
   return false;
 }
 
+function isInternalReasoningReply(text: string) {
+  const normalized = text.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^(okay|alright|sure|let me)\b/i.test(normalized) && /the user|i need to|break this down/i.test(normalized)) {
+    return true;
+  }
+
+  return INTERNAL_REASONING_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 function sanitizeReply(text: string) {
   const withoutContacts = text
     .replace(/\[Your Business Name\]\s*Team/gi, "our team")
@@ -242,40 +273,182 @@ function ensureSentence(text: string) {
 }
 
 function trimWords(text: string, maxWords: number) {
-  const words = text.trim().split(/\s+/).filter(Boolean);
+  const normalized = ensureSentence(text);
+  const words = normalized.trim().split(/\s+/).filter(Boolean);
   if (words.length <= maxWords) {
-    return ensureSentence(text);
+    return normalized;
+  }
+
+  const sentences = normalized.match(/[^.!?]+[.!?]+/g)?.map((sentence) => sentence.trim()) ?? [];
+  if (sentences.length > 1) {
+    const kept: string[] = [];
+    for (const sentence of sentences) {
+      const candidate = [...kept, sentence].join(" ");
+      if (countWords(candidate) > maxWords) {
+        break;
+      }
+
+      kept.push(sentence);
+    }
+
+    if (kept.length > 0) {
+      return ensureSentence(kept.join(" "));
+    }
   }
 
   return ensureSentence(words.slice(0, maxWords).join(" "));
+}
+
+function getStyleRequirements(style: ReplyStyle, rating: number) {
+  if (style === "quick_pro") {
+    return [
+      "- Style: Quick Pro",
+      "- 25 to 50 words",
+      "- Concise and polished",
+      "- Maximum 2 sentences",
+      "- Prioritize clarity and professionalism",
+    ];
+  }
+
+  if (style === "warm_personal") {
+    return [
+      "- Style: Warm Personal",
+      "- 45 to 80 words",
+      "- Warm and personable tone",
+      "- Mention appreciation and one specific detail from the review",
+      "- Keep it natural and human",
+    ];
+  }
+
+  if (style === "growth_recovery") {
+    return rating >= 4
+      ? [
+        "- Style: Growth",
+        "- 55 to 95 words",
+        "- Thank them and reinforce trust",
+        "- Include a subtle invitation to return",
+        "- Keep wording premium and professional",
+      ]
+      : [
+        "- Style: Recovery",
+        "- 55 to 95 words",
+        "- Lead with empathy and accountability",
+        "- Mention concrete improvement focus",
+        '- End with: "If you need any help or have any questions, please reach out."',
+      ];
+  }
+
+  return [
+    "- Style: Professional default",
+    "- 35 to 90 words",
+    "- Natural, specific, and complete",
+    "- Professional and friendly",
+  ];
 }
 
 function buildSingleReplyPrompt({
   reviewerName,
   rating,
   reviewText,
+  style = "default",
+  variationTag,
+  avoidText,
 }: {
   reviewerName: string;
   rating: number;
   reviewText: string;
+  style?: ReplyStyle;
+  variationTag?: string;
+  avoidText?: string;
 }) {
-  const firstName = reviewerName.split(" ")[0] ?? "there";
+  const firstName = getFirstName(reviewerName);
+  const avoidExcerpt = avoidText?.trim().slice(0, 260);
 
   return [
     `Reviewer first name: ${firstName}`,
     `Star rating: ${rating}`,
     `Review text: ${reviewText}`,
+    avoidExcerpt ? `Existing draft wording to avoid repeating: ${avoidExcerpt}` : "",
     "Reply requirements:",
-    "- 35 to 90 words",
-    "- Natural, specific, and complete",
-    "- Professional and friendly",
+    ...getStyleRequirements(style, rating),
     "- Do not include placeholders",
     "- Never include phone, email, URL, social, or address details",
     "- Never ask them to contact a specific channel",
     '- If help is needed, use exactly: "If you need any help or have any questions, please reach out."',
+    "- Return only the final customer-facing reply text",
+    "- If an existing draft is provided, use clearly different wording and sentence structure",
+    "- Never include analysis, reasoning, planning, or process notes",
+    '- Never write phrases like "the user", "I need to", or "let me break this down"',
     "- One paragraph only",
     "- End with a complete sentence and punctuation",
-  ].join("\n");
+    variationTag ? `- Variation marker for wording diversity (do not output): ${variationTag}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function buildTemplateReply({
+  reviewerName,
+  rating,
+  style = "default",
+}: {
+  reviewerName: string;
+  rating: number;
+  style?: ReplyStyle;
+}) {
+  const firstName = getFirstName(reviewerName);
+
+  if (style === "quick_pro") {
+    if (rating >= 4) {
+      return trimWords(
+        `Hi ${firstName}, thank you for your great review. We are glad you had a smooth experience and truly appreciate your support.`,
+        50,
+      );
+    }
+
+    return trimWords(
+      `Hi ${firstName}, thank you for your feedback. We are sorry your experience was not fully smooth, and we are actively improving this area.`,
+      50,
+    );
+  }
+
+  if (style === "warm_personal" || style === "default") {
+    if (rating >= 4) {
+      return trimWords(
+        `Hi ${firstName}, thank you for the wonderful review. We are delighted to hear you had a great experience and that our team made the process easy and friendly. We truly appreciate your support and look forward to welcoming you again soon.`,
+        90,
+      );
+    }
+
+    if (rating === 3) {
+      return trimWords(
+        `Hi ${firstName}, thank you for your feedback. We are glad parts of your visit went well, and we are sorry the wait time felt longer than expected. We are working on improving pacing and communication so your next experience is smoother. We appreciate you sharing this with us.`,
+        90,
+      );
+    }
+
+    return trimWords(
+      `Hi ${firstName}, thank you for your honest feedback, and we are sorry your experience did not meet expectations. We take your comments seriously and are addressing this with our team to improve service quality and communication. If you need any help or have any questions, please reach out.`,
+      90,
+    );
+  }
+
+  if (rating >= 4) {
+    return trimWords(
+      `Hi ${firstName}, thank you for your kind review. We are pleased to know our team delivered a strong experience. We remain committed to excellent service and would be glad to welcome you back soon.`,
+      90,
+    );
+  }
+
+  if (rating === 3) {
+    return trimWords(
+      `Hi ${firstName}, thank you for your feedback. We are sorry parts of your visit did not meet your expectations. We are actively improving wait-time management and communication so your next visit feels more consistent and smooth.`,
+      90,
+    );
+  }
+
+  return trimWords(
+    `Hi ${firstName}, thank you for your honest feedback, and we are sorry your experience did not meet expectations. We take your comments seriously and are addressing this with our team to improve service quality and communication. If you need any help or have any questions, please reach out.`,
+    90,
+  );
 }
 
 function dedupeOptions(options: string[]) {
@@ -293,6 +466,35 @@ function dedupeOptions(options: string[]) {
   }
 
   return deduped;
+}
+
+function tokenizeForSimilarity(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 4);
+}
+
+function lexicalSimilarity(a: string, b: string) {
+  const setA = new Set(tokenizeForSimilarity(a));
+  const setB = new Set(tokenizeForSimilarity(b));
+  if (setA.size === 0 || setB.size === 0) {
+    return 0;
+  }
+
+  let overlap = 0;
+  for (const token of Array.from(setA)) {
+    if (setB.has(token)) {
+      overlap += 1;
+    }
+  }
+
+  return overlap / Math.min(setA.size, setB.size);
+}
+
+function isTooSimilar(a: string, b: string) {
+  return lexicalSimilarity(a, b) >= 0.7;
 }
 
 function buildFallbackOptionSet(baseReply: string, rating: number) {
@@ -470,79 +672,189 @@ function shouldBreakModelLoop(error: ReplyGenerationError) {
   );
 }
 
+function createVariationTag(scope: string) {
+  return `${scope}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export async function generateReplyOptions({
   reviewerName,
   rating,
   reviewText,
+  avoidReplyText,
 }: {
   reviewerName: string;
   rating: number;
   reviewText: string;
+  avoidReplyText?: string;
 }) {
-  // Reliability-first path:
-  // generate one high-quality base reply, then derive the 3 UX options locally.
-  // This avoids model-specific failures on large structured multi-option prompts.
-  const baseReply = await generateReplyText({ reviewerName, rating, reviewText });
-  const orderedOptions = buildFallbackOptionSet(baseReply, rating);
-  const uniqueOrdered: string[] = [];
+  const runTag = createVariationTag("regen");
+  const plans: Array<{
+    key: ReplyOption["key"];
+    label: ReplyOption["label"];
+    style: ReplyStyle;
+    maxWords: number;
+    maxOutputTokens: number;
+    temperature: number;
+  }> = [
+    {
+      key: "quick_pro",
+      label: "Quick Pro",
+      style: "quick_pro",
+      maxWords: 50,
+      maxOutputTokens: 110,
+      temperature: 0.7,
+    },
+    {
+      key: "warm_personal",
+      label: "Warm Personal",
+      style: "warm_personal",
+      maxWords: 80,
+      maxOutputTokens: 160,
+      temperature: 0.78,
+    },
+    {
+      key: "growth_recovery",
+      label: "Growth/Recovery",
+      style: "growth_recovery",
+      maxWords: 95,
+      maxOutputTokens: 200,
+      temperature: 0.82,
+    },
+  ];
 
-  for (const option of orderedOptions) {
-    const normalized = ensureSentence(option);
-    if (!normalized) {
+  const generated: ReplyOption[] = [];
+  for (const plan of plans) {
+    const text = await generateReplyText({
+      reviewerName,
+      rating,
+      reviewText,
+      avoidText: avoidReplyText,
+      style: plan.style,
+      maxOutputTokens: plan.maxOutputTokens,
+      temperature: plan.temperature,
+      variationTag: createVariationTag(`${runTag}-${plan.key}`),
+    });
+
+    const normalized = trimWords(ensureSentence(text), plan.maxWords);
+    generated.push({
+      key: plan.key,
+      label: plan.label,
+      text: normalized,
+      wordCount: countWords(normalized),
+    });
+  }
+
+  for (let index = 1; index < generated.length; index += 1) {
+    const current = generated[index];
+    if (!current) {
       continue;
     }
 
-    if (!uniqueOrdered.some((existing) => existing.toLowerCase() === normalized.toLowerCase())) {
-      uniqueOrdered.push(normalized);
+    const previous = generated.slice(0, index).map((item) => item.text);
+    const needsRewrite = previous.some((item) => isTooSimilar(item, current.text));
+    if (!needsRewrite) {
+      continue;
     }
-  }
 
-  if (uniqueOrdered.length < 3) {
-    const fallbackPool = normalizeToThreeOptions([baseReply], rating);
-    for (const option of fallbackPool) {
-      if (uniqueOrdered.length >= 3) {
-        break;
-      }
-
-      if (!uniqueOrdered.some((existing) => existing.toLowerCase() === option.toLowerCase())) {
-        uniqueOrdered.push(option);
-      }
+    const plan = plans[index];
+    if (!plan) {
+      continue;
     }
+
+    const strongerAvoid = [avoidReplyText, ...previous].filter(Boolean).join(" ");
+    const rewritten = await generateReplyText({
+      reviewerName,
+      rating,
+      reviewText,
+      avoidText: strongerAvoid,
+      style: plan.style,
+      maxOutputTokens: plan.maxOutputTokens,
+      temperature: Math.min(plan.temperature + 0.06, 0.92),
+      variationTag: createVariationTag(`${runTag}-${plan.key}-rewrite`),
+    });
+
+    const normalizedRewrite = trimWords(ensureSentence(rewritten), plan.maxWords);
+    generated[index] = {
+      ...current,
+      text: normalizedRewrite,
+      wordCount: countWords(normalizedRewrite),
+    };
   }
 
-  if (uniqueOrdered.length > 0) {
-    return toReplyOptions(uniqueOrdered.slice(0, 3));
+  const unique = dedupeOptions(generated.map((item) => item.text));
+  if (unique.length < 3) {
+    const fallbackSeed = generated[1]?.text || generated[0]?.text || buildTemplateReply({
+      reviewerName,
+      rating,
+      style: "warm_personal",
+    });
+    const fallbackSet = normalizeToThreeOptions([fallbackSeed], rating);
+    const composed = dedupeOptions([...generated.map((item) => item.text), ...fallbackSet]).slice(0, 3);
+    return toReplyOptions(composed);
   }
 
-  throw new ReplyGenerationError("Gemini returned an empty reply.", 500, "empty_response");
+  return generated;
 }
 
 export async function generateReplyText({
   reviewerName,
   rating,
   reviewText,
+  avoidText,
+  style = "default",
+  variationTag,
+  maxOutputTokens,
+  temperature,
 }: {
   reviewerName: string;
   rating: number;
   reviewText: string;
+  avoidText?: string;
+  style?: ReplyStyle;
+  variationTag?: string;
+  maxOutputTokens?: number;
+  temperature?: number;
 }) {
   const models = getModelList();
   const maxAttempts = getMaxAttempts();
+  const baseOutputTokens = maxOutputTokens && maxOutputTokens > 30 ? maxOutputTokens : 140;
+  const baseTemperature = Number.isFinite(temperature) ? Number(temperature) : 0.62;
   let bestCandidate = "";
   let lastError: ReplyGenerationError | null = null;
   let rateLimitError: ReplyGenerationError | null = null;
+  const templateFallback = buildTemplateReply({ reviewerName, rating, style });
 
   for (const model of models) {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
+        const attemptTokens = attempt === 1 ? baseOutputTokens : Math.min(baseOutputTokens + 60, 260);
+        const attemptTemperature = attempt === 1
+          ? baseTemperature
+          : Math.min(baseTemperature + 0.04, 0.95);
         const result = await generateWithGemini({
           model,
-          userPrompt: buildSingleReplyPrompt({ reviewerName, rating, reviewText }),
-          maxOutputTokens: attempt === 1 ? 140 : 200,
-          temperature: 0.62,
+          userPrompt: buildSingleReplyPrompt({
+            reviewerName,
+            rating,
+            reviewText,
+            avoidText,
+            style,
+            variationTag: variationTag ? `${variationTag}-a${attempt}` : undefined,
+          }),
+          maxOutputTokens: attemptTokens,
+          temperature: attemptTemperature,
         });
 
         const cleaned = ensureSentence(result.text);
+        if (isInternalReasoningReply(cleaned)) {
+          lastError = new ReplyGenerationError(
+            "AI returned internal reasoning instead of a customer-facing reply.",
+            502,
+            "invalid_reasoning",
+          );
+          continue;
+        }
+
         if (cleaned.length > bestCandidate.length) {
           bestCandidate = cleaned;
         }
@@ -595,8 +907,12 @@ export async function generateReplyText({
     return bestCandidate;
   }
 
-  if (bestCandidate) {
+  if (bestCandidate && !isInternalReasoningReply(bestCandidate)) {
     return ensureSentence(bestCandidate);
+  }
+
+  if (lastError?.code === "invalid_reasoning") {
+    return templateFallback;
   }
 
   if (lastError) {
@@ -607,5 +923,5 @@ export async function generateReplyText({
     throw lastError;
   }
 
-  throw new ReplyGenerationError("Gemini returned an empty reply.", 500, "empty_response");
+  return templateFallback;
 }

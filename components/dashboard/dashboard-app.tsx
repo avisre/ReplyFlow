@@ -46,6 +46,7 @@ type ReviewItem = {
 };
 
 type FilterTab = "all" | "awaiting" | "replied";
+type GenerateMode = "single" | "options";
 
 type SettingsState = {
   autoPostReplies: boolean;
@@ -76,6 +77,7 @@ export default function DashboardApp() {
   const [isLoadingReviews, setIsLoadingReviews] = useState(true);
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [generatingReviewId, setGeneratingReviewId] = useState<string | null>(null);
+  const [generatingMode, setGeneratingMode] = useState<GenerateMode | null>(null);
   const [postingReviewId, setPostingReviewId] = useState<string | null>(null);
   const [deletingDraftReviewId, setDeletingDraftReviewId] = useState<string | null>(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
@@ -220,8 +222,9 @@ export default function DashboardApp() {
     ];
   };
 
-  const handleGenerateReply = async (reviewId: string) => {
+  const handleGenerateReply = async (reviewId: string, mode: GenerateMode) => {
     setGeneratingReviewId(reviewId);
+    setGeneratingMode(mode);
 
     try {
       const response = await fetch("/api/reviews/generate", {
@@ -229,12 +232,13 @@ export default function DashboardApp() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ reviewId }),
+        body: JSON.stringify({ reviewId, mode }),
       });
 
       const data = (await response.json()) as {
         review?: ReviewItem;
         options?: GeneratedReplyOption[];
+        mode?: GenerateMode;
         autoPosted?: boolean;
         warning?: string | null;
         error?: string;
@@ -244,11 +248,23 @@ export default function DashboardApp() {
       }
 
       updateReview(data.review);
-      const normalizedOptions = normalizeOptions(data.options, data.review.generatedReply);
-      setReplyOptionsByReviewId((current) => ({
-        ...current,
-        [reviewId]: normalizedOptions,
-      }));
+      const resolvedMode = data.mode ?? mode;
+      const normalizedOptions = resolvedMode === "options"
+        ? normalizeOptions(data.options, data.review.generatedReply)
+        : [];
+
+      setReplyOptionsByReviewId((current) => {
+        if (normalizedOptions.length === 0) {
+          const next = { ...current };
+          delete next[reviewId];
+          return next;
+        }
+
+        return {
+          ...current,
+          [reviewId]: normalizedOptions,
+        };
+      });
       if (data.autoPosted) {
         setReplyOptionsByReviewId((current) => {
           const next = { ...current };
@@ -257,11 +273,15 @@ export default function DashboardApp() {
         });
         toast.success("Reply generated and auto-posted.");
       } else {
-        toast.success(
-          normalizedOptions.length >= 3
-            ? "3 professional reply options generated."
-            : "Reply generated.",
-        );
+        if (resolvedMode === "options") {
+          toast.success(
+            normalizedOptions.length >= 3
+              ? "3 professional reply options generated."
+              : "Alternative options generated.",
+          );
+        } else {
+          toast.success("Reply generated.");
+        }
       }
 
       if (data.warning) {
@@ -272,6 +292,7 @@ export default function DashboardApp() {
       toast.error("Unable to generate AI reply.");
     } finally {
       setGeneratingReviewId(null);
+      setGeneratingMode(null);
     }
   };
 
@@ -841,14 +862,14 @@ export default function DashboardApp() {
                       {review.status === "pending" ? (
                         <button
                           type="button"
-                          onClick={() => handleGenerateReply(review._id)}
+                          onClick={() => handleGenerateReply(review._id, "options")}
                           disabled={isGenerating}
                           className="btn-primary mt-4"
                         >
                           {isGenerating ? (
                             <>
                               <LoadingSpinner />
-                              Generating...
+                              {generatingMode === "options" ? "Generating options..." : "Generating..."}
                             </>
                           ) : (
                             "Generate 3 Reply Options"
@@ -908,14 +929,14 @@ export default function DashboardApp() {
 
                             <button
                               type="button"
-                              onClick={() => handleGenerateReply(review._id)}
+                              onClick={() => handleGenerateReply(review._id, "options")}
                               disabled={isGenerating || isPosting || isDeletingDraft}
                               className="btn-secondary"
                             >
                               {isGenerating ? (
                                 <>
                                   <LoadingSpinner className="text-indigo-600" />
-                                  Regenerating...
+                                  {generatingMode === "options" ? "Generating options..." : "Generating..."}
                                 </>
                               ) : (
                                 "Regenerate 3 Options"

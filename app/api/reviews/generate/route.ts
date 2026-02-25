@@ -2,7 +2,7 @@ import { authOptions } from "@/lib/auth";
 import { decryptSecret } from "@/lib/crypto";
 import { connectToDatabase } from "@/lib/db";
 import { postReplyToGoogle } from "@/lib/google";
-import { ReplyGenerationError, generateReplyOptions } from "@/lib/reply";
+import { ReplyGenerationError, generateReplyOptions, generateReplyText } from "@/lib/reply";
 import Review from "@/models/Review";
 import User from "@/models/User";
 import { getServerSession } from "next-auth";
@@ -45,10 +45,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json()) as { reviewId?: string };
+    const body = (await request.json()) as { reviewId?: string; mode?: "single" | "options" };
     if (!body.reviewId) {
       return NextResponse.json({ error: "reviewId is required" }, { status: 400 });
     }
+    const mode = body.mode === "options" ? "options" : "single";
 
     await connectToDatabase();
 
@@ -64,12 +65,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Review or user not found" }, { status: 404 });
     }
 
-    const generatedOptions = await generateReplyOptions({
-      reviewerName: review.reviewerName,
-      rating: review.rating,
-      reviewText: review.reviewText,
-    });
-    const generatedReply = generatedOptions[0]?.text ?? "";
+    const generatedOptions = mode === "options"
+      ? await generateReplyOptions({
+        reviewerName: review.reviewerName,
+        rating: review.rating,
+        reviewText: review.reviewText,
+        avoidReplyText: review.generatedReply,
+      })
+      : [];
+    const generatedReply = mode === "options"
+      ? generatedOptions[0]?.text ?? ""
+      : await generateReplyText({
+        reviewerName: review.reviewerName,
+        rating: review.rating,
+        reviewText: review.reviewText,
+        style: "warm_personal",
+      });
 
     if (!generatedReply) {
       return NextResponse.json({ error: "Failed to generate reply" }, { status: 500 });
@@ -82,7 +93,7 @@ export async function POST(request: Request) {
     let autoPosted = false;
     let autoPostWarning: string | null = null;
 
-    if (user.autoPostReplies) {
+    if (mode === "single" && user.autoPostReplies) {
       try {
         const googleResult = await postReplyToGoogle({
           accessToken: decryptSecret(user.googleAccessToken),
@@ -108,6 +119,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       review: serializeReview(review),
       options: generatedOptions,
+      mode,
       autoPosted,
       warning: autoPostWarning,
     });
